@@ -328,9 +328,10 @@ def perform_retrieval(band_name,background_atmosphere,prebio_spec,test_spec,wlen
 # noise - noise of instrument in wavelength range (in ppm)
 # min_abundance - minimum log10(mass_fraction) to start testing at (must be below detection threshold). Will run quicker if this value is higher..
 # spectral_resolution - spectral resolution to evaluate at (currently choice of 100 and 1000)
+# output_file - .txt file to open and write detection threshold in form: band_name, test_species, prebio_species, detection threshold mass fraction, mean retrieved mass fraction of prebio_species, MMW
 
 
-def assess_detectability(band_name,background_atmosphere,prebio_spec,test_spec,wlen_min,wlen_max,noise,min_abundance=-6,spectral_resolution=1000):
+def assess_detectability(band_name,background_atmosphere,prebio_spec,test_spec,wlen_min,wlen_max,noise,min_abundance=-6,spectral_resolution=1000,output_file='Results.txt'):
     
     back, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution,test_spec,prebio_spec)
     
