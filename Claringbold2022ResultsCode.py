@@ -21,15 +21,15 @@ import PostImpact_10Myr
 import prebiosignatures
 
 #import observing parameters
-import GJ1132b_R250
+import GJ1132b
 
-PandArc.simulate_JWST_noise(GJ1132b_R250,spectral_resolution=100)
+PandArc.simulate_JWST_noise(GJ1132b,spectral_resolution=100)
 
 TriArc.run_atmosphere(Hycean,
                       prebiosignatures,
                       JWST_noise = True,
                       spectral_resolution = 100,
-                      output_file = 'Results_Hycean_R250.txt')
+                      output_file = 'Results_Hycean.txt')
 
 
 TriArc.run_atmosphere(URVolcanic,
