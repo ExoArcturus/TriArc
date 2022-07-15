@@ -5,7 +5,7 @@ author: A. B. Claringbold (ExoArcturus)
 Built on petitRADTRANS (https://petitradtrans.readthedocs.io/en/latest/)
 and utilising PandExo (https://natashabatalha.github.io/PandExo/)
 
-Paper for citation will be available soon, in the mean time please contact me if you would like to use TriArc (abc38@cam.ac.uk).
+Paper for citation will be available soon, in the meantime please contact me if you would like to use TriArc (abc38@cam.ac.uk).
 
 Requires:
 petitRADTRANS,
