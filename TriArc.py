@@ -6,24 +6,29 @@ Created on Tue Jun 28 11:39:42 2022
 @author: arcturus
 """
 
-
+# import the usual...
 import numpy as np
 import pylab as plt
 
-#import constants from pRT (not used currently)
+
+# import constants from pRT
 from petitRADTRANS import nat_cst as nc
-#import main package from pRT
+# import main package from pRT
 from petitRADTRANS import Radtrans
 
-#import molecular weights of species
+# import molecular weights of species
 import molecular_weights as mw
+
 
 # ----- CLASSES -----
 
 # define exoPlanet class, with all inputs for exoplanetary system
 
 class exoPlanet:
-    def __init__(self, R_pl, R_st, gravity, P0, temp, composition, lin_spec, ray_spec, cont_spec, MMW, mixing_ratios,species_l):
+    def __init__(self, R_pl, R_st, gravity, P0, temp, 
+                 composition, lin_spec, ray_spec, 
+                 cont_spec, MMW, mixing_ratios, species_l):
+        
         self.R_pl = R_pl                            # radius of planet (surface defined by pressure, P0, for gaseous planets)
         self.R_st = R_st                            # radius of parent star
         self.gravity = gravity                      # surface gravity of planet
@@ -42,17 +47,44 @@ class exoPlanet:
 
 class Atmosphere_Model:
     def __init__(self, comp, planet, temps, model):
+        
         self.comp = comp                            # vertical composition dictionary profile of mass fractions
         self.planet = planet                        # exoPlanet object to keep simple inputs stored
         self.temps = temps                          # vertical temperature profile with pressure
         self.model = model                          # Radtrans object, containing all opacity data
-  
+
+# define Spectral_band class, with all necessary parameters to describe the spectral bands used to target the retrieval
+
+class Spectral_Band:
+    def __init__(self, band_label, min_wlen, max_wlen, precision, 
+                 species_1, species_2=None,species_3=None,species_4=None,species_5=None):
+        
+        self.label = band_label                     # used to label the band, SHOULD BE SAME AS KEY OF DICTIONARY containing all spectral bands
+        self.min_wlen = min_wlen                    # upper wavelength limit of band in microns
+        self.max_wlen = max_wlen                    # lower wavelength limit of band in microns
+        self.precision = precision                  # precision of instrument (noise to be added) at the band
+        species = []                                
+        species.append(species_1)                   # add all inputted species (up to 5) into a list
+        if species_2 != None:                       
+            species.append(species_2)
+        if species_3 != None:
+            species.append(species_3)
+        if species_4 != None:
+            species.append(species_4)
+        if species_5 != None:
+            species.append(species_5)
+        self.species = species                      # initialise list of species
+        
+   
+    
+# Plot parameters for reasonably nice figures
+plt.rcParams['font.family'] = "serif"
+plt.rcParams['figure.figsize'] = (10,6)
+plt.rcParams['font.size'] = 18
     
 # ----- INITIALISATION FUNCTIONS FOR IMPORTING INPUT FILES -----
-# load in input file (e.g. Hycean.py) which should be imported in script utilising TriArc, and creates exoPlanet object.
-# also performs conversion to mass fraction and calculates mean molecular weight.
 
-""" input files must include the following:
+""" planet input files must include the following:
     
     planet_radius - loaded in as R_pl (in cgs units)
     star_radius - loaded in as R_st (in cgs units)
@@ -68,29 +100,179 @@ class Atmosphere_Model:
     abundances - dictionary of mixing ratios, using molecule name as a key, e.g. abundances['CH4'] = 0.01 (1% methane)
 """
 
-def load_planet(atm):
-    
-    #import atmospheric composition (in mixing ratios)
+# load in planet input file (e.g. Hycean.py) which should be imported in script utilising TriArc, and creates exoPlanet object.
+# also performs conversion to mass fraction and calculates mean molecular weight.
+
+
+def load_planet(atm):                       # argument is an imported file (i.e. something.py after import something)
+    print('Loading in planet input file: ' +str(atm)+'.py')
+
+    # import atmospheric composition (in mixing ratios)
     n = atm.abundances
     
-    #calculate mean molecular weight (MMW)
+    # calculate mean molecular weight (MMW)
     MMW = 0
     species_list=[]
     species_list = atm.species_list
+    
     #remove duplicates from species list using dictionary
     species_list = list(dict.fromkeys(species_list))
     for species in species_list:
         MMW = MMW + mw.mass[species] * n[species]
-    print(MMW)
+    print('Atmosphere mean molecular weight: '+str(MMW))
     
-    #convert from abundances to mass fractions
+    # convert from abundances to mass fractions
     mass_fraction={}
     for species in species_list:
         mf =  n[species] * ( mw.mass[species] / MMW)
         mass_fraction[species]=mf
-    #print(mass_fraction)
-    generic_planet = exoPlanet(atm.planet_radius,atm.star_radius,atm.surface_gravity,atm.surface_pressure,atm.iso_temperature,mass_fraction,atm.line_species,atm.rayleigh_species,atm.cont_species,MMW,n,species_list)
+    print('Atmosphere mass fractions:')
+    print(mass_fraction)
+    
+    # creates exoPlanet object based on inputs loaded in from input file
+    generic_planet = exoPlanet(atm.planet_radius,
+                               atm.star_radius,
+                               atm.surface_gravity,
+                               atm.surface_pressure,
+                               atm.iso_temperature,
+                               mass_fraction,
+                               atm.line_species,
+                               atm.rayleigh_species,
+                               atm.cont_species,
+                               MMW,
+                               n,
+                               species_list)
+    print(str(atm)+'.py successfully loaded.')
     return generic_planet
+
+""" band data input files must import the Spectral_Band class from TriArc:
+    from TriArc import Spectral_Band
+    
+    the each band should be specified with:
+        band_list={}
+        band_list['label'] = Spectral_Band('label', min bound on wavelength, max bound on wavelength, precision, 'species 1', 'species 2' (etc.))
+    
+    note additional species (beyond one) are optional. the precision should be a default or placeholder value, if not fetching JWST noise from text files.
+"""
+
+# load in band list input file (e.g. prebiosignatures.py) which should be imported in script utilising TriArc,
+# and creates dictionary of Spectral_Band objects.
+# will also fetch JWST noise if JWST_nosie = True, otherwise will use default values which need to be specified in input file
+
+def compile_band_list(band_input_data,
+                      JWST_noise=True,
+                      spectral_resolution=1000, 
+                      use_prism=True, 
+                      auto_assign=True):
+    
+    # create dictionary of Spectral Band objects from band_input_data input file (e.g. prebiosignature.py)
+    print('Loading in band data input file: '+str(band_input_data)+'.py')
+    all_bands = {}
+    all_bands = band_input_data.band_list       
+
+    # overrides default noise values with JWST noises created using PandArc or otherwise if JWST_Noise == True.    
+    if JWST_noise == True:
+        noise = implement_JWST_noises(all_bands,auto_assign=auto_assign,use_prism=use_prism,spectral_resolution=spectral_resolution)
+        for band in all_bands.keys():
+            all_bands[band].precision = noise[band]
+            
+    # otherwise uses default values which must be specified in band input data
+    else:
+        print('Using default noise specified in band_input_data file.')
+    return all_bands
+
+
+# loads in JWST noise text file labelled with instrument_R_spectral_resolution e.g. NIRSpec G395M_R_1000
+# calculates and returns the average noise within the wavelength range specified
+# see PandArc.py for how to create JWST noise files (which all automatically be created with the appropriate name)
+
+def fetch_JWST_noise(wlen_min,                          # minimum wavelength 
+                     wlen_max,
+                     instrument,
+                     spectral_resolution=1000):
+       
+    # load in text file, first column should be wavelengths (in microns), second column should be precision in ppm
+    instrument_data = np.loadtxt(instrument+'_R_'+str(spectral_resolution)+'.txt')
+    wavelengths = instrument_data[:,0]
+    precision = instrument_data[:,1]
+    
+    # discard values out of range of specified wavelengths
+    precision_in_range = precision[np.where(wavelengths < wlen_max)]
+    new_wavelengths = wavelengths[np.where(wavelengths < wlen_max)]
+    precision_in_range_in_range = precision_in_range[np.where(new_wavelengths > wlen_min)]
+    
+    # calculate mean precision
+    mean_precision = np.mean(precision_in_range_in_range)
+    return mean_precision
+
+
+# automatically assigns instruments based on approach described in Claringbold et al. 2022
+# for 'R<=100, use_prism=True' uses NIRSpec Prism, NIRSpec G395M and MIRI LRS.
+# for 'R<=100, use_prism=False' uses NIRSpec G140M, NIRSpec G235M, NIRSpec G395M and MIRI LRS.
+# for 'R>100' uses NIRSpec 140H, NIRSpec G235H and NIRSpec  
+# (note no option for MIRI, so do not include bands > 5 microns at high resolution)!!!
+
+# if not using auto assign, must specify instruments[band] in script
+
+# be careful that each band is entirely within the wavelength range of a single instrument
+
+def auto_assign_instruments(wlen_max,spectral_resolution,use_prism=True):
+        
+    # high resolution (<5 microns only), R > 100
+    if spectral_resolution > 100:
+        if wlen_max > 5:
+            print('MIRI LRS (>5 micron band) does not operate at this spectral resolution. Use spectral resolution of R=100 or less, or remove the band.')
+            instrument = None
+        elif 5 >= wlen_max > 2.9:
+            instrument = 'NIRSpec G395H'
+        elif 2.9 >= wlen_max > 1.8:
+            instrument = 'NIRSpec G235H'
+        elif wlen_max <= 1.8:
+            instrument = 'NIRSpec G140H'
+        else:
+            print('Invalid wavelength range on band.')
+            instrument = None
+            
+    # low resolution, R<= 100  
+    else:
+        if wlen_max > 5:
+            instrument = 'MIRI LRS'
+        elif 5 >= wlen_max > 2.9:
+            instrument = 'NIRSpec G395M'
+        elif 2.9 >= wlen_max:
+            
+            # gives option to exclude NIRSpec Prism and instead use G140M and G235M filters
+            # this may be required if the target is too bright for the prism (saturation issues)
+            if use_prism == True:
+                instrument = 'NIRSpec Prism'
+            else:
+                if wlen_max <= 1.8:
+                    instrument = 'NIRSpec G140M'
+                else:
+                    instrument = 'NIRSpec G235M'
+    return instrument
+            
+
+# Function to assign JWST data to the bands specified in the band_data file, overriding default values in file.
+
+def implement_JWST_noises(band_data,auto_assign=True,use_prism=True,spectral_resolution=1000,instruments=None):
+    precision = {}
+    
+    # auto-assigns instruments, if manually specified must specify all bands with instruments[band] in script.
+    if auto_assign == True:
+        instruments = {}
+        print('Automatically assigning JWST instruments to each band based on wavelength...')
+        for band in band_data.keys():
+            instruments[band] = auto_assign_instruments(band_data[band].max_wlen,spectral_resolution)
+    
+    # repeat: if not using auto assign, must specify instruments[band] in script!!!
+         
+    print('Loading in JWST noise data...')
+    
+    # using fetch_JWST_noise for each band to enter in noise data
+    for band in band_data.keys():
+        precision[band] = fetch_JWST_noise(band_data[band].min_wlen,band_data[band].max_wlen,instruments[band],spectral_resolution=spectral_resolution)
+    return precision
 
 # ----- Intermediate functions, used by the high-level functions (e.g. perform retrieval, access detectability) -----
 
@@ -105,7 +287,7 @@ def transmission_spectrum(comp, planet, temps, model):
     model.calc_transm(temps, comp, planet.gravity, mean_mol_weight, R_pl=planet.R_pl, P0_bar=planet.P0)
     
     #return transmission spectrum in ( transmission radius / star radius ) squared, in ppm
-    return ((model.transm_rad/planet.R_st)**2)*10**6
+    return ((model.transm_rad/planet.R_st)**2)*10**6, model.freq
 
 #Function to add noise to a transmission spectrum.
 
@@ -174,10 +356,11 @@ def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution
     #Import background atmosphere object, with arguments R_pl (radius of planet), R_st (radius of star), P0 (surface pressure), gravity, temp, composition (mass fractions), lin_spec, ray_spec, cont_spec, MMW (mean molecular weight), n (vol fractions)
     atm = background_atmosphere
     
+    print('Setting up atmosphere...')
     
     #Instructs the use of opacities if rebinned to lower spectral resolution (must be prepared beforehand)
     if spectral_resolution != 1000:
-        test_species, prebio_species, atm.species_l, atm.lin_spec, atm.composition = select_spectral_resolution(test_species,prebio_species,background_atmosphere,spectral_resolution)
+        test_species, prebio_species, atm.species_l, atm.lin_spec, atm.composition = select_spectral_resolution(test_species,prebio_species,atm,spectral_resolution)
     
         
     #Reads in opacity sources in Radtrans object
@@ -197,7 +380,9 @@ def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution
     back = Atmosphere_Model(mass_fractions,atm,temperature,model_atmosphere)
     
     #Calculates a transmission spectrum for background atmosphere
-    background_spectrum = transmission_spectrum(mass_fractions, atm, temperature, model_atmosphere)
+    background_spectrum, frequencies = transmission_spectrum(mass_fractions, atm, temperature, model_atmosphere)
+    
+    print('    Atmosphere setup successfully.')
     
     return back, background_spectrum, test_species, prebio_species
     
@@ -206,6 +391,8 @@ def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution
 
 def generate_test_spectra(back_atm,background_spec,test_species,signal_samples=111):
     
+    print('Creating hypothesis spectra...')
+    
     #Choose uniform prior in log space to apply sampling over
     test_abundances = np.logspace(-11,0,num=signal_samples)
     
@@ -213,9 +400,12 @@ def generate_test_spectra(back_atm,background_spec,test_species,signal_samples=1
     signal_list=[]
     for abundance_species in test_abundances:
         back_atm.comp[test_species] = abundance_species * np.ones_like(back_atm.temps)
-        signal_bg = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model)
+        signal_bg, frequencies = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model)
         signal = signal_bg - background_spec
         signal_list.append(signal)
+    
+    print('    Hypothesis spectra successfully created.')
+    
     return signal_list, test_abundances
 
 #Primary function, injects prebiosignature into background, performs Bayesian analysis against set of test spectra, to output posterior PDF.
@@ -227,7 +417,7 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
     back_atm.comp[prebio_species] = prebio_signal * np.ones_like(back_atm.temps)
     
     #Calculate a model transmission spectrum
-    model_bg = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model)
+    model_bg, frequencies = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model)
     
     #Subtract the background
     model =  model_bg - background_spec
@@ -258,6 +448,76 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
 
 # ----- HIGH-LEVEL FUNCTIONS FOR RETRIEVALS -----
 
+# ----- Function to plot the transmission spectrum/spectra -----
+# Plot up to three spectra on the same plot: background, with a prebiosignature added, with a prebiosignature and noise added
+# By default only the prebiosignature added is plotted (set prebio_signal = 0 for this to be the background)
+# Use plot_background = True to plot the background
+# Use plot_noisy = True to plot the noisy signal in addition to the noiseless spectrum
+# background_atmosphere - exoPlanet object input data (after using .load_planet(input file))
+# wlen_min - minimum bound on wavelength to plot
+# wlen_max - maximum bound on wavelength to plot
+# prebio_spec - species to add to background
+# plot_label, plot_title - to adorn the plot
+# prebiosignal - mass fraction of prebio_spec to add to the background
+# spectral resolution - spectral_resolution to plot at
+# noise - noise to add to noisy spectrum to be plotted
+
+def plot_spectrum(background_atmosphere,
+                  wlen_min=1,
+                  wlen_max=10,
+                  prebio_spec='no_species',
+                  plot_label="", plot_title="",
+                  prebio_signal=0,
+                  spectral_resolution=1000,
+                  plot_background=False,
+                  noise=0,
+                  plot_noisy=False):
+    
+    # Set up atmosphere
+    atmosphere, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,
+                                                                                     wlen_min, wlen_max,
+                                                                                     spectral_resolution=spectral_resolution,
+                                                                                     prebio_species=prebio_spec)
+    
+    # Inject prebio species into background atmosphere
+    atmosphere.comp[prebio_species] = prebio_signal * np.ones_like(atmosphere.temps)
+    
+    # Compute transmission spectrum
+    print('Computing transmission spectrum')
+    spectrum, frequencies = transmission_spectrum(atmosphere.comp, atmosphere.planet, atmosphere.temps, atmosphere.model)
+    
+    # Create x ticks for the plot
+    x_ticks = np.linspace(wlen_min,wlen_max,10)
+    x_ticks_int=[]
+    for i in range(len(x_ticks)):
+        x_ticks_int.append(int(x_ticks[i]))
+
+    # prepare the plot
+    plt.title(plot_title)
+    plt.xscale('log')
+    plt.xlabel('Wavelength ($\mu$m)')
+    plt.ylabel('Transit depth $(R_t/R_*)^2$ (ppm)')
+    
+    plt.xticks(x_ticks,x_ticks_int)
+    
+    # adds noise to new spectrum, noisy_spectrum
+    if noise != 0:
+        noisy_spectrum = add_noise(spectrum,noise)
+    
+    # plots background if True
+    if plot_background == True:
+        plt.plot(nc.c/frequencies/1e-4, background_spectrum, label = plot_label, linewidth=1)
+        
+    # plots noisy signal if True
+    if plot_noisy == True:
+        plt.plot(nc.c/frequencies/1e-4, noisy_spectrum, label = plot_label, linewidth=1)
+        
+    # plots signal
+    plt.plot(nc.c/frequencies/1e-4, spectrum, label = plot_label, linewidth=1)
+    
+    # saves plot
+    plt.savefig('Transmission_spectrum.pdf')
+
 # ----- Function to retrieve specific quantities of prebiosignature molecule -----
 # band name - band name for identification see Claringbold et al. 2022
 # background_atmosphere - background atmospheric and planetary properties in form of exoPlanet object (see top)
@@ -267,11 +527,19 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
 # noise - noise of instrument in wavelength range (in ppm)
 # prebio_abundance - mass fraction of prebio_species added to the background
 # spectral_resolution - spectral resolution to evaluate at (currently choice of 100 to 1000)
+# plot - determine whether to save a plot of the posterior PDF
 
-
-def perform_retrieval(band_name,background_atmosphere,prebio_spec,test_spec,wlen_min,wlen_max,noise,prebio_abundance,spectral_resolution=1000):
+def perform_retrieval(band_name,
+                      background_atmosphere,
+                      prebio_spec, test_spec,
+                      wlen_min, wlen_max, 
+                      noise, 
+                      prebio_abundance, 
+                      spectral_resolution=1000, 
+                      plot=True):
     
     back, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution,test_spec,prebio_spec)
+    
     #generate test spectra
     signal_samples=111
     signal_list, test_abundances = generate_test_spectra(back,background_spectrum,test_species,signal_samples)
@@ -280,17 +548,18 @@ def perform_retrieval(band_name,background_atmosphere,prebio_spec,test_spec,wlen
     #Set retrieved species to 0, and recalculate MMW.
     back.comp[test_species]= 0 * np.ones_like(back.temps)
     
-    #recalculate mean molecular weight (MMW)
-    #back.planet.MMW = recalc_MMW(background_atmosphere,test_species)
+    print('Retrieving '+test_species+'...')   
     
     #perform Bayesian analysis between model and test spectra
     fits_mean = bayesian_analysis(prebio_abundance,back,background_spectrum,prebio_species,noise,signal_list,signal_samples)
     
     #plot the posterior pdf
-    plt.plot(test_abundances, fits_mean)
-    plt.xscale('log')
-    plt.xlabel('Abundance of HCN')
-    plt.ylabel('Bayesian likelihood')
+    if plot==True:
+        plt.plot(test_abundances, fits_mean)
+        plt.xscale('log')
+        plt.xlabel('Abundance of '+prebio_species)
+        plt.ylabel('Bayesian likelihood')
+        plt.savefig('Retrieval.pdf')
     
     mean_abundance=0
     std_abundance=0
@@ -302,6 +571,8 @@ def perform_retrieval(band_name,background_atmosphere,prebio_spec,test_spec,wlen
     for i in range(0,signal_samples-1):
         mean_abundance = mean_abundance + (fits_mean[i] * log_test_abundances[i])
     mean_abundance_lin = 10**mean_abundance
+    print("    Retrieval complete.")
+    
     print("mean retrieved abundance = " + str(mean_abundance_lin))
     print("mean retrieved abundance (log10) = " + str(mean_abundance))
     
@@ -315,10 +586,6 @@ def perform_retrieval(band_name,background_atmosphere,prebio_spec,test_spec,wlen
     
     return fits_mean
 
-
-
-
-
 # ----- Function to calculate the detectability threshold -----
 # band_name - band name for identification, see Claringbold et al. 2022
 # background_atmosphere - background atmospheric and planetary properties in form of exoPlanet object (see top)
@@ -331,10 +598,17 @@ def perform_retrieval(band_name,background_atmosphere,prebio_spec,test_spec,wlen
 # output_file - .txt file to open and write detection threshold in form: band_name, test_species, prebio_species, detection threshold mass fraction, mean retrieved mass fraction of prebio_species, MMW
 
 
-def assess_detectability(band_name,background_atmosphere,prebio_spec,test_spec,wlen_min,wlen_max,noise,min_abundance=-6,spectral_resolution=1000,output_file='Results.txt'):
+def assess_detectability(band_name,
+                         background_atmosphere,
+                         prebio_spec, test_spec,
+                         wlen_min, wlen_max,
+                         noise,
+                         min_abundance=-6,
+                         spectral_resolution=1000,
+                         output_file='Results.txt'):
     
-    back, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution,test_spec,prebio_spec)
-    
+    back_atm, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution,test_spec,prebio_spec)
+    back = back_atm
     #Generate the hypothesis spectra
     signal_samples=111
     signal_list, test_abundances = generate_test_spectra(back,background_spectrum,test_species,signal_samples) 
@@ -345,6 +619,7 @@ def assess_detectability(band_name,background_atmosphere,prebio_spec,test_spec,w
     #recalculate mean molecular weight (MMW)
     #back.planet.MMW = recalc_MMW(background_atmosphere,test_species)
       
+    print('Finding detection threshold of '+prebio_spec)
     
     detection_significance_sum=0
     
@@ -419,12 +694,141 @@ def assess_detectability(band_name,background_atmosphere,prebio_spec,test_spec,w
     else:
         print(band_name + "\t" + test_species + "\t complete")
         output = [band_name,prebio_species,test_species,prebio_signal,mean_abundance_lin,back.planet.MMW]
-        with open('Results.txt', 'a') as f:
+        with open(output_file, 'a') as f:
             f.write('\n')
             for item in output:
                 f.write('%s\t' % item)
+    
+    return prebio_signal
+
+
+# ----- Function to find detection threshold for a spectral band -----
+# band_name - label of band to run (should be key of band_list dictionary in band_input_data)
+# atmosphere_input_data - background atmosphere input data file (e.g. Hycean.py) should be imported beforehand
+# band_input_data - band input data file (e.g. prebiosignatures.py) should be imported beforehand
+# spectral_resolution - specify spectral_resolution (opacity data must be prepared beforehand)
+# retrieved_species - specify which species to find detection tresholds for, or 'All' to retrieve all species with features in the band
+# JWST_noise - True to use JWST noise from .txt files, False to use defaults specified in band_input_data
+# output_file - .txt file to save results to
+# auto_assign - whether to automatically assign each band an instrument based on wavelength or spectral resolution
+# (if False, must specify instrument[band] beforehand)
+# min_abundance - minimum mass fraction to test for detection threshold (see assess_detectability)
+
+def run_band(band_name,
+             atmosphere_input_data,
+             band_input_data,
+             spectral_resolution=1000,
+             retrieved_species='All',
+             JWST_noise=True,
+             output_file='Results.txt',
+             auto_assign=True,
+             min_abundance=-6):
+    
+    # reassign to shorter variable name
+    atm = atmosphere_input_data
+    
+    # load in band_list_data
+    band_list = compile_band_list(band_input_data,
+                                  JWST_noise=JWST_noise,
+                                  auto_assign=auto_assign,
+                                  spectral_resolution=spectral_resolution)
+    
+    # pick out specified band
+    print('Finding detection thresholds in band '+band_name+'...')
+    band = band_list[band_name]
+    
+    # retireves all species (default)
+    if retrieved_species == 'All':
+        print('    Retrieving all species with features in band')
+        
+        # loop over all species in band
+        for spec in band.species:   
+            
+            # load in atmosphere input data
+            atmos = load_planet(atm)
+            
+            # assess detectability using data from band
+            assess_detectability(band.label,
+                                 atmos,
+                                 spec, spec,
+                                 band.min_wlen, band.max_wlen,
+                                 band.precision,
+                                 spectral_resolution=spectral_resolution,
+                                 output_file=output_file,
+                                 min_abundance=min_abundance)
+    
+    # retrieve single specified species
+    else:
+        print('    Retrieving only ' + retrieved_species)
+        atmos = load_planet(atm)
+        assess_detectability(band.label,
+                             atmos,
+                             retrieved_species, retrieved_species,
+                             band.min_wlen, band.max_wlen,
+                             band.noise,
+                             spectral_resolution,
+                             output_file=output_file,
+                             min_abundance=min_abundance)
+
+# ----- Function to find detection threshold for all spectral band -----
+# atmosphere_input_data - background atmosphere input data file (e.g. Hycean.py) should be imported beforehand
+# band_input_data - band input data file (e.g. prebiosignatures.py) should be imported beforehand
+# spectral_resolution - specify spectral_resolution (opacity data must be prepared beforehand)
+# JWST_noise - True to use JWST noise from .txt files, False to use defaults specified in band_input_data
+# output_file - .txt file to save results to
+# auto_assign - whether to automatically assign each band an instrument based on wavelength or spectral resolution
+# (if False, must specify instrument[band] beforehand)
+# min_abundance - minimum mass fraction to test for detection threshold (see assess_detectability)
+
+def run_atmosphere(atmosphere_input_data,
+                   band_input_data,
+                   spectral_resolution=1000,
+                   JWST_noise=True,
+                   output_file='Results.txt',
+                   auto_assign=True,
+                   min_abundance=-6):
+    
+    print('Finding detection thresholds in: '+str(atmosphere_input_data)+'.py')
+    print('using band list data from: '+str(band_input_data)+'.py')
+    
+    # reassign to shorter variable name    
+    atm = atmosphere_input_data
+    
+    # load in band_list input data
+    band_list = compile_band_list(band_input_data,JWST_noise=JWST_noise,auto_assign=auto_assign,spectral_resolution=spectral_resolution)
+    print('Bands to run:')
+    print(band_list.keys())
+    
+    # iterate over bands
+    for band in band_list.values():
+        print('Finding detection thresholds in band '+band.label+'...')
+        
+        # iterate over species in bands
+        for spec in band.species:
+            print('    Retrieving ' + spec)
+            
+            # load in atmosphere
+            atmos = load_planet(atm)
+            
+            # assess detectability using data from band
+            assess_detectability(band.label,
+                                 atmos,
+                                 spec, spec,
+                                 band.min_wlen, band.max_wlen,
+                                 band.precision,
+                                 spectral_resolution=spectral_resolution,
+                                 output_file=output_file,
+                                 min_abundance=min_abundance)
+    
+    print(str(atmosphere_input_data)+' detection thresholds computed successfully!')
+    print('Find results in '+output_file)
+    
 
     
+    
+    
+    
+
 
     
     
