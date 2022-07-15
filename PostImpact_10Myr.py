@@ -15,7 +15,7 @@ surface_pressure = 45
 iso_temperature = 424
 
 line_species = ['CH4','CO','CO2','H2O','NH3','HCN','C2H2','H2S','NO','SO2']
-rayleigh_species = ['H2','CO']
+rayleigh_species = ['H2']
 cont_species = ['H2-H2']
 species_list = ['CH4','CO','CO2','H2O','NH3','H2','He','HCN','C2H2','H2S','NO','SO2','N2']
 
