@@ -57,7 +57,7 @@ class Atmosphere_Model:
 
 class Spectral_Band:
     def __init__(self, band_label, min_wlen, max_wlen, precision, 
-                 species_1, species_2=None,species_3=None,species_4=None,species_5=None):
+                 species_1, species_2=None,species_3=None,species_4=None,species_5=None,species_6=None):
         
         self.label = band_label                     # used to label the band, SHOULD BE SAME AS KEY OF DICTIONARY containing all spectral bands
         self.min_wlen = min_wlen                    # upper wavelength limit of band in microns
@@ -73,6 +73,8 @@ class Spectral_Band:
             species.append(species_4)
         if species_5 != None:
             species.append(species_5)
+        if species_6 != None:
+            species.append(species_6)
         self.species = species                      # initialise list of species
         
    
@@ -246,10 +248,7 @@ def auto_assign_instruments(wlen_max,spectral_resolution,use_prism=True):
             if use_prism == True:
                 instrument = 'NIRSpec Prism'
             else:
-                if wlen_max <= 1.8:
-                    instrument = 'NIRSpec G140M'
-                else:
-                    instrument = 'NIRSpec G235M'
+                instrument = 'NIRISS SOSS'
     return instrument
             
 
@@ -279,12 +278,12 @@ def implement_JWST_noises(band_data,auto_assign=True,use_prism=True,spectral_res
 
 #Function to calculate the transmission spectrum for a given composition (comp), exoPlanet object (planet), temperature profile (temps), Radtrans object (model). 
 
-def transmission_spectrum(comp, planet, temps, model):
+def transmission_spectrum(comp, planet, temps, model, **kwargs):
     #input uniform mixing ratio in column
     mean_mol_weight = planet.MMW*np.ones_like(temps)
     
     #use pRT function to calculate transmission spectrum
-    model.calc_transm(temps, comp, planet.gravity, mean_mol_weight, R_pl=planet.R_pl, P0_bar=planet.P0)
+    model.calc_transm(temps, comp, planet.gravity, mean_mol_weight, R_pl=planet.R_pl, P0_bar=planet.P0, **kwargs)
     
     #return transmission spectrum in ( transmission radius / star radius ) squared, in ppm
     return ((model.transm_rad/planet.R_st)**2)*10**6, model.freq
@@ -352,7 +351,7 @@ def select_spectral_resolution(test_species,prebio_species,background_atmosphere
 
 #Function to setup the pressure-temperature profile and opacity data to create Atmosphere_Model object.
 
-def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution=1000,test_species='CO',prebio_species='CO'):
+def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution=1000,test_species='CO',prebio_species='CO', **spectrum_kwargs):
     #Import background atmosphere object, with arguments R_pl (radius of planet), R_st (radius of star), P0 (surface pressure), gravity, temp, composition (mass fractions), lin_spec, ray_spec, cont_spec, MMW (mean molecular weight), n (vol fractions)
     atm = background_atmosphere
     
@@ -380,7 +379,7 @@ def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution
     back = Atmosphere_Model(mass_fractions,atm,temperature,model_atmosphere)
     
     #Calculates a transmission spectrum for background atmosphere
-    background_spectrum, frequencies = transmission_spectrum(mass_fractions, atm, temperature, model_atmosphere)
+    background_spectrum, frequencies = transmission_spectrum(mass_fractions, atm, temperature, model_atmosphere,**spectrum_kwargs)
     
     print('    Atmosphere setup successfully.')
     
@@ -389,7 +388,7 @@ def setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution
 
 #Function to generate test transmission spectra (the 'hypotheses' in Bayes' theorem) for different abundances to test against.
 
-def generate_test_spectra(back_atm,background_spec,test_species,signal_samples=111):
+def generate_test_spectra(back_atm,background_spec,test_species,signal_samples=111,**spectrum_kwargs):
     
     print('Creating hypothesis spectra...')
     
@@ -400,7 +399,7 @@ def generate_test_spectra(back_atm,background_spec,test_species,signal_samples=1
     signal_list=[]
     for abundance_species in test_abundances:
         back_atm.comp[test_species] = abundance_species * np.ones_like(back_atm.temps)
-        signal_bg, frequencies = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model)
+        signal_bg, frequencies = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model, **spectrum_kwargs)
         signal = signal_bg - background_spec
         signal_list.append(signal)
     
@@ -411,13 +410,13 @@ def generate_test_spectra(back_atm,background_spec,test_species,signal_samples=1
 #Primary function, injects prebiosignature into background, performs Bayesian analysis against set of test spectra, to output posterior PDF.
 #Uses add_noise and goodness_of_fit functions
 
-def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,noise,signal_list,signal_samples=111):
+def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,noise,signal_list,signal_samples=111,**spectrum_kwargs):
     
     #Adds specified amount of prebiosignature molecule
     back_atm.comp[prebio_species] = prebio_signal * np.ones_like(back_atm.temps)
     
     #Calculate a model transmission spectrum
-    model_bg, frequencies = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model)
+    model_bg, frequencies = transmission_spectrum(back_atm.comp, back_atm.planet, back_atm.temps, back_atm.model, **spectrum_kwargs)
     
     #Subtract the background
     model =  model_bg - background_spec
@@ -463,6 +462,7 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
 # noise - noise to add to noisy spectrum to be plotted
 
 def plot_spectrum(background_atmosphere,
+                  filename='Figure.pdf',
                   wlen_min=1,
                   wlen_max=10,
                   prebio_spec='no_species',
@@ -471,20 +471,24 @@ def plot_spectrum(background_atmosphere,
                   spectral_resolution=1000,
                   plot_background=False,
                   noise=0,
-                  plot_noisy=False):
+                  plot_noisy=False,
+                  clear_plot=True,
+                  custom_xticks=False,
+                  **spectrum_kwargs):
     
     # Set up atmosphere
     atmosphere, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,
                                                                                      wlen_min, wlen_max,
                                                                                      spectral_resolution=spectral_resolution,
-                                                                                     prebio_species=prebio_spec)
+                                                                                     prebio_species=prebio_spec,
+                                                                                     **spectrum_kwargs)
     
     # Inject prebio species into background atmosphere
     atmosphere.comp[prebio_species] = prebio_signal * np.ones_like(atmosphere.temps)
     
     # Compute transmission spectrum
     print('Computing transmission spectrum')
-    spectrum, frequencies = transmission_spectrum(atmosphere.comp, atmosphere.planet, atmosphere.temps, atmosphere.model)
+    spectrum, frequencies = transmission_spectrum(atmosphere.comp, atmosphere.planet, atmosphere.temps, atmosphere.model, **spectrum_kwargs)
     
     # Create x ticks for the plot
     x_ticks = np.linspace(wlen_min,wlen_max,10)
@@ -498,7 +502,8 @@ def plot_spectrum(background_atmosphere,
     plt.xlabel('Wavelength ($\mu$m)')
     plt.ylabel('Transit depth $(R_t/R_*)^2$ (ppm)')
     
-    plt.xticks(x_ticks,x_ticks_int)
+    if custom_xticks == False:
+        plt.xticks(x_ticks,x_ticks_int)
     
     # adds noise to new spectrum, noisy_spectrum
     if noise != 0:
@@ -506,17 +511,20 @@ def plot_spectrum(background_atmosphere,
     
     # plots background if True
     if plot_background == True:
-        plt.plot(nc.c/frequencies/1e-4, background_spectrum, label = plot_label, linewidth=1)
+        plt.plot(nc.c/frequencies/1e-4, background_spectrum, label = 'Background', linewidth=1)
         
     # plots noisy signal if True
     if plot_noisy == True:
-        plt.plot(nc.c/frequencies/1e-4, noisy_spectrum, label = plot_label, linewidth=1)
+        plt.plot(nc.c/frequencies/1e-4, noisy_spectrum, label = 'With noisy signal', linewidth=1)
         
     # plots signal
     plt.plot(nc.c/frequencies/1e-4, spectrum, label = plot_label, linewidth=1)
     
+    plt.legend()
     # saves plot
-    plt.savefig('Transmission_spectrum.pdf')
+    plt.savefig(filename)
+    if clear_plot == True:
+        plt.clf()
 
 # ----- Function to retrieve specific quantities of prebiosignature molecule -----
 # band name - band name for identification see Claringbold et al. 2022
@@ -557,7 +565,7 @@ def perform_retrieval(band_name,
     if plot==True:
         plt.plot(test_abundances, fits_mean)
         plt.xscale('log')
-        plt.xlabel('Abundance of '+prebio_species)
+        plt.xlabel('Mass Fraction of '+prebio_species)
         plt.ylabel('Bayesian likelihood')
         plt.savefig('Retrieval.pdf')
     
@@ -584,7 +592,7 @@ def perform_retrieval(band_name,
     print("std of retrieved abundance (log10) = " + str(std_abundance))
 
     
-    return fits_mean
+    return test_abundances, fits_mean
 
 # ----- Function to calculate the detectability threshold -----
 # band_name - band name for identification, see Claringbold et al. 2022
@@ -605,13 +613,14 @@ def assess_detectability(band_name,
                          noise,
                          min_abundance=-6,
                          spectral_resolution=1000,
-                         output_file='Results.txt'):
+                         output_file='Results.txt',
+                         **spectrum_kwargs):
     
-    back_atm, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution,test_spec,prebio_spec)
+    back_atm, background_spectrum, test_species, prebio_species = setup_atmosphere(background_atmosphere,wlen_min,wlen_max,spectral_resolution,test_spec,prebio_spec,**spectrum_kwargs)
     back = back_atm
     #Generate the hypothesis spectra
     signal_samples=111
-    signal_list, test_abundances = generate_test_spectra(back,background_spectrum,test_species,signal_samples) 
+    signal_list, test_abundances = generate_test_spectra(back,background_spectrum,test_species,signal_samples,**spectrum_kwargs) 
     
     #Set retrieved species to 0
     back.comp[test_species] = 0 * np.ones_like(back.temps)
@@ -638,7 +647,7 @@ def assess_detectability(band_name,
         j = j + 1
         
         #perform bayesian analysis on the model spectrum and return posterior PDF
-        fits_mean = bayesian_analysis(prebio_signal, back, background_spectrum, prebio_species, noise, signal_list, signal_samples)
+        fits_mean = bayesian_analysis(prebio_signal, back, background_spectrum, prebio_species, noise, signal_list, signal_samples, **spectrum_kwargs)
         
         #create empty variables
         new_fits_mean = []
@@ -722,7 +731,9 @@ def run_band(band_name,
              JWST_noise=True,
              output_file='Results.txt',
              auto_assign=True,
-             min_abundance=-6):
+             min_abundance=-6,
+             use_prism=True,
+             **spectrum_kwargs):
     
     # reassign to shorter variable name
     atm = atmosphere_input_data
@@ -731,7 +742,8 @@ def run_band(band_name,
     band_list = compile_band_list(band_input_data,
                                   JWST_noise=JWST_noise,
                                   auto_assign=auto_assign,
-                                  spectral_resolution=spectral_resolution)
+                                  spectral_resolution=spectral_resolution,
+                                  use_prism=use_prism)
     
     # pick out specified band
     print('Finding detection thresholds in band '+band_name+'...')
@@ -755,7 +767,8 @@ def run_band(band_name,
                                  band.precision,
                                  spectral_resolution=spectral_resolution,
                                  output_file=output_file,
-                                 min_abundance=min_abundance)
+                                 min_abundance=min_abundance,
+                                 **spectrum_kwargs)
     
     # retrieve single specified species
     else:
@@ -765,10 +778,11 @@ def run_band(band_name,
                              atmos,
                              retrieved_species, retrieved_species,
                              band.min_wlen, band.max_wlen,
-                             band.noise,
-                             spectral_resolution,
+                             band.precision,
+                             spectral_resolution=spectral_resolution,
                              output_file=output_file,
-                             min_abundance=min_abundance)
+                             min_abundance=min_abundance,
+                             **spectrum_kwargs)
 
 # ----- Function to find detection threshold for all spectral band -----
 # atmosphere_input_data - background atmosphere input data file (e.g. Hycean.py) should be imported beforehand
@@ -786,7 +800,9 @@ def run_atmosphere(atmosphere_input_data,
                    JWST_noise=True,
                    output_file='Results.txt',
                    auto_assign=True,
-                   min_abundance=-6):
+                   min_abundance=-6,
+                   use_prism=True,
+                   **spectrum_kwargs):
     
     print('Finding detection thresholds in: '+str(atmosphere_input_data)+'.py')
     print('using band list data from: '+str(band_input_data)+'.py')
@@ -795,7 +811,7 @@ def run_atmosphere(atmosphere_input_data,
     atm = atmosphere_input_data
     
     # load in band_list input data
-    band_list = compile_band_list(band_input_data,JWST_noise=JWST_noise,auto_assign=auto_assign,spectral_resolution=spectral_resolution)
+    band_list = compile_band_list(band_input_data,JWST_noise=JWST_noise,auto_assign=auto_assign,spectral_resolution=spectral_resolution,use_prism=use_prism)
     print('Bands to run:')
     print(band_list.keys())
     
@@ -818,17 +834,12 @@ def run_atmosphere(atmosphere_input_data,
                                  band.precision,
                                  spectral_resolution=spectral_resolution,
                                  output_file=output_file,
-                                 min_abundance=min_abundance)
+                                 min_abundance=min_abundance,
+                                 **spectrum_kwargs)
     
     print(str(atmosphere_input_data)+' detection thresholds computed successfully!')
     print('Find results in '+output_file)
     
-
-    
-    
-    
-    
-
 
     
     

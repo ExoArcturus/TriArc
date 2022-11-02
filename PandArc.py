@@ -103,7 +103,7 @@ def simulate_JWST_noise(obs_target,spectral_resolution=1000,instrument_list='Def
         
     # otherwise run medium-spec NIRSpec instruments, and low-res NIRSpec Prism and MIRI LRS.
     else:
-        default_instrument_list = ['NIRSpec Prism','NIRSpec G140M','NIRSpec G235M','NIRSpec G395M','MIRI LRS']
+        default_instrument_list = ['NIRSpec Prism','NIRISS SOSS','NIRSpec G395M','MIRI LRS']
         
     # if no instruments manually added, just use default list (above)
     if instrument_list == 'Default':
@@ -165,7 +165,79 @@ def simulate_JWST_noise(obs_target,spectral_resolution=1000,instrument_list='Def
             np.savetxt(file_name,output)
     
     print('    Instrument precision profiles successfully generated.')
+    
+def run_exo_dict(exo_dict,spectral_resolution=1000,instrument_list='Default'):
+    
+    # determines instrument list to run (in addition to manually added ones) based on spectral resolution
+    
+    # for high resolution, use high-res NIRSpec instruments
+    if spectral_resolution > 100:
+        default_instrument_list = ['NIRSpec G140H','NIRSpec G235H','NIRSpec G395H']
         
+    # otherwise run medium-spec NIRSpec instruments, and low-res NIRSpec Prism and MIRI LRS.
+    else:
+        default_instrument_list = ['NIRSpec Prism','NIRISS SOSS','NIRSpec G395M','MIRI LRS']
+        
+    # if no instruments manually added, just use default list (above)
+    if instrument_list == 'Default':
+        instrument_list = default_instrument_list
+        
+    # otherwise use manually specified list, adding in default instruments as well
+    else:
+        for instrument in default_instrument_list not in instrument_list:
+            instrument_list.append(instrument)
+            
+    # run PandExo to simulate observations
+    print('Simulating JWST observations to generate noise...')
+    results = jdi.run_pandexo(exo_dict,instrument_list,save_file=False)
+    
+    # high-res mode, rebins instruments to spectral_resolution, add outputs wavelength (x) and precision at that wavelength.
+    if spectral_resolution > 100:
+        for i, inst in enumerate(instrument_list):
+            
+            # extracts values from simulated transmission spectrum
+            x,y,e = jpi.jwst_1d_spec(results[i][inst],plot=False,model=False,R=spectral_resolution)
+            x = x[0]
+            e = e[0]*1e6 #PPM UNITS!
+            
+            # saves file as instrument_R_spectral_resolution.txt for use by TriArc
+            
+            # compile appropriate file name
+            file_name = inst+'_R_'+str(spectral_resolution)+'.txt'
+            
+            # output wavelengths and precision as two column-file
+            output = np.column_stack((x,e))
+            print('Saving '+file_name)
+            np.savetxt(file_name,output)
+            
+    # low-res mode, rebins instrument to specified resolution, except MIRI and Prism which are kept at native
+    else:
+        for i, inst in enumerate(instrument_list):
+            if 'MIRI' not in inst:
+                if 'Prism' not in inst:
+                    x,y,e = jpi.jwst_1d_spec(results[i][inst],plot=False,model=False,R=spectral_resolution)
+                    x = x[0]
+                    e = e[0]*1e6 #PPM UNITS!
+                else:
+                    # extracts values directly from results, so no need for jpi rebinning
+                    x = results[i][inst]['FinalSpectrum']['wave']
+                    e = results[i][inst]['FinalSpectrum']['error_w_floor']*1e6
+            else:
+                # extracts values directly from results, so no need for jpi rebinning
+                x = results[i][inst]['FinalSpectrum']['wave']
+                e = results[i][inst]['FinalSpectrum']['error_w_floor']*1e6
+                
+            # saves file as instrument_R_spectral_resolution.txt for use by TriArc
+            
+            # compile appropriate file name
+            file_name = inst+'_R_'+str(spectral_resolution)+'.txt'
+            
+            # output wavelengths and precision as two column-file
+            output = np.column_stack((x,e))
+            print('Saving '+file_name)
+            np.savetxt(file_name,output)
+    
+    print('    Instrument precision profiles successfully generated.')
 
 
 
