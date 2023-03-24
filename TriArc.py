@@ -79,11 +79,23 @@ class Spectral_Band:
         
    
     
+
+    
 # Plot parameters for reasonably nice figures
 plt.rcParams['font.family'] = "serif"
 plt.rcParams['figure.figsize'] = (10,6)
 plt.rcParams['font.size'] = 18
     
+
+
+def logsumexp(arr):
+    max_val = np.max(arr)
+    arr_shifted = arr - max_val
+    arr_exp = np.exp(arr_shifted)
+    sum_exp = np.sum(arr_exp)
+    result = np.log(sum_exp) + max_val
+    return result
+
 # ----- INITIALISATION FUNCTIONS FOR IMPORTING INPUT FILES -----
 
 """ planet input files must include the following:
@@ -299,10 +311,10 @@ def add_noise(model_spec, noise_sd):
 
 def goodness_of_fit(noisy_signal, signal, sigma):
     # calculate value of normalised gaussian least squares at each wavelength
-    gauss_least_squares = ((2 * np.pi * sigma**2)**(-1/2)) * np.exp(-(1/(2*(sigma**2))*(noisy_signal-signal)**2))
+    gauss_least_squares = np.log(((2 * np.pi * sigma**2)**(-1/2)) * np.exp(-(1/(2*(sigma**2))*(noisy_signal-signal)**2)))
     # find product of normalised gaussian least squares to calculate likelihood function
-    likelihood = np.prod(gauss_least_squares)
-    return likelihood
+    log_likelihood = np.sum(gauss_least_squares)
+    return log_likelihood
 
 #Function to recalculate the MMW with one species removed from the background atmosphere (not-functional ATM).
 
@@ -423,7 +435,7 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
     
     #Adds noise to the transmission spectrum, and calculates goodness of fit against the test spectra.
     
-    repeats = 9000
+    repeats = 900
     fits_list=np.empty([repeats,signal_samples])
     sigma=noise
     
@@ -431,11 +443,17 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
         all_fits=[]
         noisy_signal = add_noise(model, noise)
         for test_signal in signal_list:
-            fit = goodness_of_fit(noisy_signal, test_signal, sigma)
-            all_fits.append(fit)
-        normalisation=sum(all_fits)
-        all_fits = all_fits / normalisation
-        fits_list[i]=all_fits
+            log_fit = goodness_of_fit(noisy_signal, test_signal, sigma)
+            #fit = 10**log_fit
+            #print(log_fit)
+            all_fits.append(log_fit)
+            
+        normalisation=logsumexp(all_fits)
+        all_fits = all_fits - normalisation
+        
+        
+        fits_list[i]=10**all_fits
+    #print(fits_list)
         
     #Calculates the mean fit from all the fits for each noise profile, and plots it.
     
@@ -443,6 +461,7 @@ def bayesian_analysis(prebio_signal,back_atm,background_spec,prebio_species,nois
     
     #This is the posterior PDF of the bayesian analysis
     fits_mean = sum_fits/repeats
+    #print(fits_mean)
     return fits_mean
 
 # ----- HIGH-LEVEL FUNCTIONS FOR RETRIEVALS -----
@@ -515,7 +534,7 @@ def plot_spectrum(background_atmosphere,
         
     # plots noisy signal if True
     if plot_noisy == True:
-        plt.plot(nc.c/frequencies/1e-4, noisy_spectrum, label = 'With noisy signal', linewidth=1)
+        plt.errorbar(nc.c/frequencies/1e-4, noisy_spectrum, yerr=40, label = 'With noisy signal', linewidth=1)
         
     # plots signal
     plt.plot(nc.c/frequencies/1e-4, spectrum, label = plot_label, linewidth=1)
@@ -559,7 +578,8 @@ def perform_retrieval(band_name,
     print('Retrieving '+test_species+'...')   
     
     #perform Bayesian analysis between model and test spectra
-    fits_mean = bayesian_analysis(prebio_abundance,back,background_spectrum,prebio_species,noise,signal_list,signal_samples)
+    unnorm_fits_mean = bayesian_analysis(prebio_abundance,back,background_spectrum,prebio_species,noise,signal_list,signal_samples)
+    fits_mean = unnorm_fits_mean/sum(unnorm_fits_mean)
     
     #plot the posterior pdf
     if plot==True:
@@ -656,7 +676,8 @@ def assess_detectability(band_name,
         
         
         log_test_abundances=np.log10(test_abundances)
-        
+        plt.plot(test_abundances,fits_mean/sum(fits_mean))
+        plt.xscale('log')
         
         #calculate the mean retrieved abundance
         for i in range(0,signal_samples-1):
@@ -674,8 +695,8 @@ def assess_detectability(band_name,
                 new_test_abundances.append(test_abundances[i])
         
         #sum all of the successful retrievals
-        detection_significance_sum = sum(new_fits_mean)
-        
+        detection_significance_sum = sum(new_fits_mean)/sum(fits_mean)
+        #print(detection_significance_sum)
         
         sum_elements=0
         
@@ -811,7 +832,11 @@ def run_atmosphere(atmosphere_input_data,
     atm = atmosphere_input_data
     
     # load in band_list input data
-    band_list = compile_band_list(band_input_data,JWST_noise=JWST_noise,auto_assign=auto_assign,spectral_resolution=spectral_resolution,use_prism=use_prism)
+    band_list = compile_band_list(band_input_data,
+                                  JWST_noise=JWST_noise,
+                                  auto_assign=auto_assign,
+                                  spectral_resolution=spectral_resolution,
+                                  use_prism=use_prism)
     print('Bands to run:')
     print(band_list.keys())
     
